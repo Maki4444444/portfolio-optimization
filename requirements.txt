@@ -1,0 +1,32 @@
+# Data acquisition
+yfinance==0.2.55
+
+# Core data handling
+pandas==2.2.3
+numpy==1.26.4
+
+# Visualization
+matplotlib==3.9.2
+seaborn==0.13.2
+
+# Statistics & time series
+statsmodels==0.14.4
+pmdarima==2.0.4
+scipy==1.13.1
+
+# Machine learning
+scikit-learn==1.5.2
+tensorflow-cpu==2.17.0
+
+# Portfolio optimization (Task 4)
+PyPortfolioOpt==1.5.5
+
+# Utilities
+joblib==1.4.2
+
+# Notebook tooling
+jupyter==1.1.1
+notebook==7.2.2
+nbformat==5.10.4
+nbconvert==7.16.4
+ipykernel==6.29.5
