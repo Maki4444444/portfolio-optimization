@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 import pmdarima as pm
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-from sklearn.preprocessing import MinMaxScaler
 import matplotlib
 
 # See task1_eda.py for why this is conditional on __main__ rather than
@@ -90,23 +89,52 @@ def build_lstm_model(window=WINDOW):
 
 
 def fit_lstm(train, test, window=WINDOW, epochs=12, batch_size=64, return_history=False):
-    scaler = MinMaxScaler()
-    train_vals = scaler.fit_transform(train.values.reshape(-1, 1))
-    # include last `window` train points so test sequences have full history
-    combined = np.concatenate([train_vals[-window:], scaler.transform(test.values.reshape(-1, 1))])
+    """
+    Trains the LSTM to predict next-day LOG RETURNS rather than raw price
+    levels. This mirrors the same reasoning that requires ARIMA to difference
+    the series (Task 1's ADF tests: price is non-stationary, returns are
+    stationary) -- a price-level LSTM has the same underlying mismatch, it's
+    just less visible here because test predictions use the TRUE historical
+    price immediately preceding each test day as input (a walk-forward
+    one-step evaluation, not recursive multi-step feedback).
 
-    X_train, y_train = make_sequences(train_vals, window)
+    Test predictions are converted back to price level via
+    next_price = true_previous_price * exp(predicted_log_return), so the
+    returned `preds` remain directly comparable (in price units) to ARIMA's
+    forecast and the actual test prices.
+    """
+    from sklearn.preprocessing import StandardScaler
+
+    full_prices = pd.concat([train, test])
+    log_prices = np.log(full_prices.values)
+    log_returns = np.diff(log_prices)  # log_returns[i] = return from full_prices[i] to full_prices[i+1]
+
+    n_train = len(train)
+    n_train_returns = n_train - 1  # returns fully contained within the train period
+
+    scaler = StandardScaler()
+    train_returns_scaled = scaler.fit_transform(log_returns[:n_train_returns].reshape(-1, 1))
+    all_returns_scaled = scaler.transform(log_returns.reshape(-1, 1))
+
+    X_train, y_train = make_sequences(train_returns_scaled, window)
     X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], 1))
 
-    X_test, y_test = make_sequences(combined, window)
+    # test sequences: windows of TRUE historical returns ending right before each test day
+    test_input = all_returns_scaled[n_train_returns - window:]
+    X_test, y_test = make_sequences(test_input, window)
     X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], 1))
 
     model = build_lstm_model(window)
     history = model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size, verbose=0,
                          validation_split=0.1)
 
-    pred_scaled = model.predict(X_test, verbose=0)
-    preds = scaler.inverse_transform(pred_scaled).flatten()
+    pred_returns_scaled = model.predict(X_test, verbose=0)
+    pred_returns = scaler.inverse_transform(pred_returns_scaled).flatten()
+
+    # reconstruct price predictions using the TRUE previous close (walk-forward,
+    # not recursively-generated) -- no compounding drift at this evaluation stage
+    prev_prices = full_prices.values[n_train_returns:n_train_returns + len(pred_returns)]
+    preds = prev_prices * np.exp(pred_returns)
 
     if return_history:
         return model, scaler, preds, history

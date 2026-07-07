@@ -44,3 +44,31 @@ def test_make_sequences_shapes():
     # first sequence should be values[0:5], target values[5]
     assert (X[0] == values[0:5, 0]).all()
     assert y[0] == values[5, 0]
+
+
+def test_fit_lstm_returns_based_prediction_alignment_and_scale():
+    """
+    fit_lstm predicts next-day LOG RETURNS internally (not raw price), then
+    reconstructs price predictions using the true previous close. This test
+    checks the plumbing (output length matches test length, predictions land
+    in a sane price range) without asserting on point-accuracy, since a
+    handful of training epochs on a short synthetic series won't be precise.
+    """
+    from task2_models import fit_lstm
+
+    rng = np.random.default_rng(0)
+    idx = pd.bdate_range("2020-01-01", periods=400)
+    # a mildly-trending, noisy synthetic price series -- long enough to
+    # exceed the 60-day window with room to spare on both sides
+    log_walk = np.cumsum(rng.normal(0.0005, 0.02, size=400))
+    prices = pd.Series(100 * np.exp(log_walk), index=idx)
+
+    train, test = prices.iloc[:340], prices.iloc[340:]
+    _, _, preds = fit_lstm(train, test, window=60, epochs=2, batch_size=64)
+
+    assert len(preds) == len(test)
+    assert np.all(preds > 0)
+    # predictions should be in the same broad ballpark as the actual prices,
+    # not off by orders of magnitude (which would indicate a reconstruction bug)
+    assert preds.min() > test.values.min() * 0.2
+    assert preds.max() < test.values.max() * 5
